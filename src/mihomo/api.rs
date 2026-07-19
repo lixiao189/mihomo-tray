@@ -385,7 +385,11 @@ fn read_http_response(stream: &mut impl Read) -> Result<(u16, Vec<u8>)> {
     }
 
     let mut body = rest.to_vec();
-    if let Some(len) = content_length {
+    // 1xx / 204 / 304 never have a message body (RFC 9110).
+    let no_body = matches!(status, 100..=199 | 204 | 304);
+    if no_body {
+        body.clear();
+    } else if let Some(len) = content_length {
         while body.len() < len {
             let n = stream.read(&mut tmp).context("read body")?;
             if n == 0 {
@@ -397,13 +401,21 @@ fn read_http_response(stream: &mut impl Read) -> Result<(u16, Vec<u8>)> {
     } else if chunked {
         body = decode_chunked(&mut body, stream)?;
     } else {
-        // No length: read until EOF (common for some local servers).
-        loop {
-            let n = stream.read(&mut tmp).context("read body until eof")?;
-            if n == 0 {
-                break;
+        // No Content-Length and not chunked: keep bytes already buffered after
+        // headers. Do not read until EOF — keep-alive peers never close, so
+        // read() would block until the socket timeout (e.g. PATCH /configs).
+        let connection_close = headers.lines().any(|line| {
+            let lower = line.to_ascii_lowercase();
+            lower.starts_with("connection:") && lower.contains("close")
+        });
+        if connection_close {
+            loop {
+                let n = stream.read(&mut tmp).context("read body until eof")?;
+                if n == 0 {
+                    break;
+                }
+                body.extend_from_slice(&tmp[..n]);
             }
-            body.extend_from_slice(&tmp[..n]);
         }
     }
 
