@@ -45,7 +45,6 @@ pub struct App {
     tun: bool,
     service_ok: bool,
     core_mode: CoreMode,
-    delays: HashMap<String, HashMap<String, u16>>,
     quitting: bool,
     ready: bool,
     progress: Option<ProgressWindow>,
@@ -79,7 +78,6 @@ impl App {
             tun: false,
             service_ok,
             core_mode: CoreMode::Sidecar,
-            delays: HashMap::new(),
             quitting: false,
             ready: false,
             progress: None,
@@ -198,12 +196,12 @@ impl App {
             service_ok: self.service_ok,
             service_supported: self.platform.service.supported(),
             groups: groups.clone(),
-            delays: self.delays.clone(),
             profiles,
             active_profile: self.active_profile.clone(),
         };
-        let (menu, ids) = tray::build_menu(&state);
-        self.menu_ids = ids;
+        let built = tray::build_menu(&state);
+        self.menu_ids = built.ids;
+        let menu = built.menu;
 
         let icon = load_icon(self.platform.appearance.as_ref())?;
         let tooltip = tray::format_group_tooltip(&groups);
@@ -212,18 +210,17 @@ impl App {
         if let Some(tray) = &mut self.tray {
             tray.set_menu(Some(Box::new(menu)));
             let _ = tray.set_tooltip(Some(tooltip));
-            self.platform
-                .appearance
-                .apply_tray_icon(tray, icon);
+            self.platform.appearance.apply_tray_icon(tray, icon);
         } else {
             let mut builder = TrayIconBuilder::new()
                 .with_menu(Box::new(menu))
                 .with_tooltip(tooltip)
-                .with_icon(icon);
+                .with_icon(icon.clone());
             if self.platform.appearance.uses_template_icon() {
                 builder = builder.with_icon_as_template(true);
             }
             let tray = builder.build().context("create tray icon")?;
+            self.platform.appearance.apply_tray_icon(&tray, icon);
             self.tray = Some(tray);
         }
         Ok(())
@@ -239,7 +236,7 @@ impl App {
             &self.tray,
             load_icon(self.platform.appearance.as_ref()),
         ) {
-            let _ = tray.set_icon(Some(icon));
+            self.platform.appearance.apply_tray_icon(tray, icon);
         }
     }
 
@@ -423,16 +420,6 @@ impl App {
                 self.service_ok = self.platform.service.is_available();
                 let _ = self.rebuild_tray();
             }
-            Action::SpeedTest(group) => {
-                let Some(api) = &self.api else { return };
-                match api.group_delay(&group) {
-                    Ok(map) => {
-                        self.delays.insert(group, map);
-                    }
-                    Err(e) => log::error!("speed test failed: {e:#}"),
-                }
-                let _ = self.rebuild_tray();
-            }
             Action::SelectProxy { group, name } => {
                 if let Some(api) = &self.api {
                     if let Err(e) = api.select_proxy(&group, &name) {
@@ -540,7 +527,6 @@ impl App {
         self.profile_meta = Some(meta);
         self.api = Some(api);
         self.active_profile = Some(path.to_path_buf());
-        self.delays.clear();
         self.last_loaded_mtime = file_mtime(path);
         Ok(())
     }
@@ -688,7 +674,8 @@ fn file_mtime(path: &Path) -> Option<SystemTime> {
 }
 
 fn load_icon(appearance: &dyn crate::platform::TrayAppearance) -> Result<tray_icon::Icon> {
-    const ICON: &[u8] = include_bytes!("../assets/menu_icon.png");
+    // Same asset ClashX ships as `menu_icon@2x.png` (32×32 px → 16×16 pt).
+    const ICON: &[u8] = include_bytes!("../assets/menu_icon@2x.png");
     let img = image::load_from_memory(ICON)?.into_rgba8();
     let (w, h) = img.dimensions();
     let mut rgba = img.into_raw();

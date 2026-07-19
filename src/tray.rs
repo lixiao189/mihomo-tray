@@ -23,7 +23,6 @@ pub enum Action {
     ToggleTun,
     InstallService,
     UninstallService,
-    SpeedTest(String),
     SelectProxy { group: String, name: String },
     SwitchProfile(String),
     ImportProfile,
@@ -58,12 +57,16 @@ pub struct TrayState {
     pub service_ok: bool,
     pub service_supported: bool,
     pub groups: Vec<ProxyInfo>,
-    pub delays: HashMap<String, HashMap<String, u16>>,
     pub profiles: Vec<std::path::PathBuf>,
     pub active_profile: Option<std::path::PathBuf>,
 }
 
-pub fn build_menu(state: &TrayState) -> (Menu, MenuIds) {
+pub struct BuiltMenu {
+    pub menu: Menu,
+    pub ids: MenuIds,
+}
+
+pub fn build_menu(state: &TrayState) -> BuiltMenu {
     let mut ids = MenuIds::new();
     let menu = Menu::new();
 
@@ -123,31 +126,13 @@ pub fn build_menu(state: &TrayState) -> (Menu, MenuIds) {
         for group in &state.groups {
             let sub = Submenu::new(&group.name, true);
 
-            let test_id = next_id("speed");
-            let test = MenuItem::with_id(
-                test_id.clone(),
-                t!("menu.speed_test").to_string(),
-                true,
-                None,
-            );
-            ids.track(&test_id, Action::SpeedTest(group.name.clone()));
-            let _ = sub.append(&test);
-            let _ = sub.append(&PredefinedMenuItem::separator());
-
-            let group_delays = state.delays.get(&group.name);
             let now = group.now.as_deref().unwrap_or("");
             let members = group.all.clone().unwrap_or_default();
             for member in members {
-                let delay = group_delays.and_then(|m| m.get(&member).copied());
-                let label = match delay {
-                    Some(0) => t!("menu.node_timeout", name = member.as_str()).to_string(),
-                    Some(d) => t!("menu.node_delay", name = member.as_str(), delay = d).to_string(),
-                    None => member.clone(),
-                };
                 let item_id = next_id("node");
                 let checked = member == now;
                 let item =
-                    CheckMenuItem::with_id(item_id.clone(), label, true, checked, None);
+                    CheckMenuItem::with_id(item_id.clone(), &member, true, checked, None);
                 ids.track(
                     &item_id,
                     Action::SelectProxy {
@@ -231,7 +216,7 @@ pub fn build_menu(state: &TrayState) -> (Menu, MenuIds) {
     ids.track(&quit_id, Action::Quit);
     let _ = menu.append(&quit);
 
-    (menu, ids)
+    BuiltMenu { menu, ids }
 }
 
 pub fn format_group_tooltip(groups: &[ProxyInfo]) -> String {

@@ -6,8 +6,6 @@ use anyhow::{Context, Result, bail};
 pub const APP_DIR_NAME: &str = "mihomo-tray";
 pub const ACTIVE_MARKER: &str = ".active";
 pub const DEFAULT_PROFILE: &str = "config.yaml";
-pub const DELAY_TEST_URL: &str = "https://www.gstatic.com/generate_204";
-pub const DELAY_TIMEOUT_MS: u32 = 5000;
 
 pub fn config_dir() -> Result<PathBuf> {
     let base = dirs::data_dir().context("cannot resolve data directory")?;

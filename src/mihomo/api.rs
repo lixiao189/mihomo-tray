@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::config::ProfileMeta;
-use crate::paths::{DELAY_TEST_URL, DELAY_TIMEOUT_MS};
 
 #[derive(Debug, Clone)]
 pub struct ApiClient {
@@ -84,11 +83,6 @@ impl ApiClient {
         }
     }
 
-    pub fn with_timeout(mut self, timeout: Duration) -> Self {
-        self.timeout = timeout;
-        self
-    }
-
     fn request(&self, method: &str, path: &str, body: Option<&Value>) -> Result<Vec<u8>> {
         let body_str = match body {
             Some(b) => serde_json::to_string(b).context("serialize request body")?,
@@ -158,8 +152,22 @@ impl ApiClient {
         Ok(parsed)
     }
 
+    /// Proxy groups in tray order, matching ClashX.Meta:
+    /// sort by index in `GLOBAL.all` (config order), skip `GLOBAL` itself.
     pub fn proxy_groups(&self) -> Result<Vec<ProxyInfo>> {
         let resp = self.proxies()?;
+        let sort_index: HashMap<String, usize> = resp
+            .proxies
+            .get("GLOBAL")
+            .and_then(|g| g.all.as_ref())
+            .map(|all| {
+                all.iter()
+                    .enumerate()
+                    .map(|(idx, name)| (name.clone(), idx))
+                    .collect()
+            })
+            .unwrap_or_default();
+
         let mut groups: Vec<_> = resp
             .proxies
             .into_iter()
@@ -173,7 +181,18 @@ impl ApiClient {
             .filter(|p| !p.hidden.unwrap_or(false))
             .filter(|p| p.name != "GLOBAL")
             .collect();
-        groups.sort_by(|a, b| a.name.cmp(&b.name));
+
+        // ClashX: `proxiesSortMap[$0.name] ?? -1` — names missing from GLOBAL sort first.
+        groups.sort_by(|a, b| {
+            let ia = sort_index.get(&a.name).copied();
+            let ib = sort_index.get(&b.name).copied();
+            match (ia, ib) {
+                (None, None) => a.name.cmp(&b.name),
+                (None, Some(_)) => std::cmp::Ordering::Less,
+                (Some(_), None) => std::cmp::Ordering::Greater,
+                (Some(x), Some(y)) => x.cmp(&y),
+            }
+        });
         Ok(groups)
     }
 
@@ -183,21 +202,6 @@ impl ApiClient {
         self.request("PUT", &path, Some(&body))
             .context("PUT /proxies")?;
         Ok(())
-    }
-
-    pub fn group_delay(&self, group: &str) -> Result<HashMap<String, u16>> {
-        let path = format!(
-            "/group/{}/delay?url={}&timeout={}",
-            urlencoding(group),
-            urlencoding(DELAY_TEST_URL),
-            DELAY_TIMEOUT_MS
-        );
-        let body = self
-            .clone()
-            .with_timeout(Duration::from_secs(60))
-            .request("GET", &path, None)
-            .context("GET /group/delay")?;
-        Ok(serde_json::from_slice(&body)?)
     }
 
     pub fn configs(&self) -> Result<RuntimeConfig> {

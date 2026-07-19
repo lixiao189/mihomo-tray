@@ -10,11 +10,11 @@ menu.tun_mode:
 
 menu.install_service:
   en: Install Service…
-  zh-CN: 安装服务…
+  zh-CN: 安装服务
 
 menu.uninstall_service:
   en: Uninstall Service…
-  zh-CN: 卸载服务…
+  zh-CN: 卸载服务
 
 menu.groups:
   en: Groups
@@ -23,18 +23,6 @@ menu.groups:
 menu.no_groups:
   en: "(No groups)"
   zh-CN: "(无分组)"
-
-menu.speed_test:
-  en: Speed Test
-  zh-CN: 测速
-
-menu.node_delay:
-  en: "%{name}  %{delay}ms"
-  zh-CN: "%{name}  %{delay}ms"
-
-menu.node_timeout:
-  en: "%{name}  timeout"
-  zh-CN: "%{name}  超时"
 
 menu.config:
   en: Config
