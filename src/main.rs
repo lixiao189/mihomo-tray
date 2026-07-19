@@ -26,13 +26,15 @@ fn main() {
 }
 
 fn run() -> anyhow::Result<()> {
-    let event_loop = EventLoop::<UserEvent>::with_user_event()
-        .build()
-        .context("create event loop")?;
+    let platform = Platform::default_for_host();
+
+    let mut builder = EventLoop::<UserEvent>::with_user_event();
+    platform.event_loop.configure(&mut builder);
+    let event_loop = builder.build().context("create event loop")?;
 
     let proxy = event_loop.create_proxy();
     app::install_event_handlers(proxy.clone());
-    let mut application = App::new(proxy, Platform::default_for_host());
+    let mut application = App::new(proxy, platform);
 
     event_loop.run_app(&mut application).context("run app")?;
     Ok(())

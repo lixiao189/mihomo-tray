@@ -1,5 +1,6 @@
 pub mod appearance;
 pub mod core;
+pub mod event_loop;
 pub mod paths;
 pub mod service;
 pub mod system;
@@ -7,6 +8,7 @@ pub mod traits;
 pub mod tun;
 
 pub use core::InstallProgress;
+pub use event_loop::EventLoopHost;
 pub use traits::{
     CoreInstaller, CoreRunner, PathLayout, PrivilegedService, SystemProxy, TrayAppearance, TunMode,
 };
@@ -18,6 +20,7 @@ pub struct Platform {
     pub tun: Arc<dyn TunMode>,
     pub service: Arc<dyn PrivilegedService>,
     pub appearance: Arc<dyn TrayAppearance>,
+    pub event_loop: EventLoopHost,
     pub core_runner: Arc<dyn CoreRunner>,
     pub installer: Arc<dyn CoreInstaller>,
     pub paths: Arc<dyn PathLayout>,
@@ -33,6 +36,7 @@ impl Platform {
             tun,
             service,
             appearance: appearance::create_appearance(),
+            event_loop: EventLoopHost::for_host(),
             core_runner: core::create_core_runner(Arc::clone(&paths)),
             installer: core::create_core_installer(Arc::clone(&paths)),
             paths,
