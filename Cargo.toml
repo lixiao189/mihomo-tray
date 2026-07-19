@@ -28,6 +28,8 @@ anyhow = "1"
 dirs = "6"
 flate2 = "1"
 image = { version = "0.25", default-features = false, features = ["png"] }
+log = "0.4"
+log4rs = "1"
 mihomo-tray-service = { path = "crates/service" }
 notify-debouncer-mini = "0.6"
 open = "5"

@@ -27,7 +27,7 @@ impl ActiveConfigWatcher {
                 let events = match res {
                     Ok(events) => events,
                     Err(e) => {
-                        eprintln!("config watch error: {e:?}");
+                        log::warn!("config watch error: {e:?}");
                         return;
                     }
                 };

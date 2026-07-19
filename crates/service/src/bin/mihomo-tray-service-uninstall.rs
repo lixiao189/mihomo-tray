@@ -7,8 +7,11 @@ use anyhow::{Result, bail};
 use mihomo_tray_service::{HELPER_DIR, LAUNCHD_PLIST, SERVICE_LABEL, SOCK_DIR, sock_path};
 
 fn main() {
+    if let Err(e) = mihomo_tray_service::init_logging("mihomo-tray-service-uninstall") {
+        eprintln!("init logging failed: {e:#}");
+    }
     if let Err(e) = run() {
-        eprintln!("mihomo-tray-service-uninstall error: {e:#}");
+        log::error!("mihomo-tray-service-uninstall error: {e:#}");
         std::process::exit(1);
     }
 }
@@ -29,7 +32,7 @@ fn run() -> Result<()> {
     let _ = fs::remove_file(sock_path());
     let _ = fs::remove_dir(SOCK_DIR);
 
-    println!("uninstalled {SERVICE_LABEL}");
+    log::info!("uninstalled {SERVICE_LABEL}");
     Ok(())
 }
 

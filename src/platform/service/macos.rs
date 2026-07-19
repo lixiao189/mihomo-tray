@@ -33,11 +33,17 @@ impl PrivilegedService for MacosLaunchDaemonService {
         );
         mihomo_tray_service::start_core(core, &config_dir, profile, &safe)
             .context("service start_core")?;
+        log::info!(
+            "service core started: {} (profile={})",
+            core.display(),
+            profile.display()
+        );
         Ok(())
     }
 
     fn stop_core(&self) -> Result<()> {
         mihomo_tray_service::stop_core().context("service stop_core")?;
+        log::info!("service core stopped");
         Ok(())
     }
 
@@ -52,6 +58,7 @@ impl PrivilegedService for MacosLaunchDaemonService {
         let script = format!(
             r#"do shell script "{shell}" with administrator privileges with prompt "{prompt}""#
         );
+        log::info!("installing privileged service via osascript");
         let output = Command::new("osascript")
             .args(["-e", &script])
             .output()
@@ -67,6 +74,7 @@ impl PrivilegedService for MacosLaunchDaemonService {
         }
         for _ in 0..40 {
             if self.is_available() {
+                log::info!("privileged service install complete and reachable");
                 return Ok(());
             }
             std::thread::sleep(std::time::Duration::from_millis(100));
@@ -85,6 +93,7 @@ impl PrivilegedService for MacosLaunchDaemonService {
         let script = format!(
             r#"do shell script "{shell}" with administrator privileges with prompt "{prompt}""#
         );
+        log::info!("uninstalling privileged service via osascript");
         let status = Command::new("osascript")
             .args(["-e", &script])
             .status()
@@ -92,6 +101,7 @@ impl PrivilegedService for MacosLaunchDaemonService {
         if !status.success() {
             bail!("uninstall service failed with {status}");
         }
+        log::info!("privileged service uninstall complete");
         Ok(())
     }
 }

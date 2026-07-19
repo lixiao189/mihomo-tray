@@ -96,13 +96,15 @@ impl App {
             return;
         }
         self.boot_started = true;
+        log::info!("bootstrap started");
 
         match self.platform.installer.needs_install() {
             Ok(true) => {
+                log::info!("mihomo core missing; starting download");
                 match ProgressWindow::create(event_loop) {
                     Ok(pw) => self.progress = Some(pw),
                     Err(e) => {
-                        eprintln!("progress window failed: {e:#}");
+                        log::error!("progress window failed: {e:#}");
                     }
                 }
                 let proxy = self.proxy.clone();
@@ -154,7 +156,7 @@ impl App {
         let api = ApiClient::from_profile(&meta);
         api.wait_ready(40, 250).context("wait for mihomo API")?;
 
-        self.core_path = Some(core_path);
+        self.core_path = Some(core_path.clone());
         self.active_profile = Some(profile.clone());
         self.profile_meta = Some(meta);
         self.api = Some(api);
@@ -163,11 +165,16 @@ impl App {
         self.ready = true;
         self.last_loaded_mtime = file_mtime(&profile);
         if let Err(e) = self.start_config_watcher(&profile) {
-            eprintln!("config watcher failed: {e:#}");
+            log::warn!("config watcher failed: {e:#}");
         }
         self.refresh_runtime_flags();
         self.rebuild_tray()?;
         self.progress = None;
+        log::info!(
+            "bootstrap complete: core={}, profile={}, mode=sidecar",
+            core_path.display(),
+            profile.display()
+        );
         Ok(())
     }
 
@@ -266,6 +273,7 @@ impl App {
             .install()
             .context("install privileged service")?;
         self.service_ok = true;
+        log::info!("privileged service installed");
         Ok(())
     }
 
@@ -277,6 +285,7 @@ impl App {
         let api = self.api.as_ref().context("no api")?;
         api.wait_ready(40, 250)?;
         self.core_mode = CoreMode::Service;
+        log::info!("switched core mode to service");
         Ok(())
     }
 
@@ -288,6 +297,7 @@ impl App {
         let api = self.api.as_ref().context("no api")?;
         api.wait_ready(40, 250)?;
         self.core_mode = CoreMode::Sidecar;
+        log::info!("switched core mode to sidecar");
         Ok(())
     }
 
@@ -302,6 +312,7 @@ impl App {
                 if self.system_proxy {
                     let _ = self.platform.system_proxy.disable();
                     self.system_proxy = false;
+                    log::info!("system proxy disabled");
                 } else {
                     if self.tun {
                         let _ = self.platform.tun.disable(&api);
@@ -320,8 +331,11 @@ impl App {
                         .map(|m| m.socks_port())
                         .unwrap_or_else(|| api.socks_port().unwrap_or(7890));
                     match self.platform.system_proxy.enable(http, socks) {
-                        Ok(()) => self.system_proxy = true,
-                        Err(e) => eprintln!("enable system proxy failed: {e:#}"),
+                        Ok(()) => {
+                            self.system_proxy = true;
+                            log::info!("system proxy enabled (http={http}, socks={socks})");
+                        }
+                        Err(e) => log::error!("enable system proxy failed: {e:#}"),
                     }
                 }
                 let _ = self.rebuild_tray();
@@ -331,9 +345,10 @@ impl App {
                 if self.tun {
                     let _ = self.platform.tun.disable(&api);
                     self.tun = false;
+                    log::info!("TUN disabled");
                     if self.core_mode == CoreMode::Service {
                         if let Err(e) = self.switch_to_sidecar_core() {
-                            eprintln!("switch to sidecar failed: {e:#}");
+                            log::error!("switch to sidecar failed: {e:#}");
                         }
                     }
                 } else {
@@ -343,24 +358,27 @@ impl App {
                     }
                     if self.platform.tun.requires_privileged_core() {
                         if let Err(e) = self.ensure_service_for_tun() {
-                            eprintln!("service required for TUN: {e:#}");
+                            log::error!("service required for TUN: {e:#}");
                             let _ = self.rebuild_tray();
                             return;
                         }
                         if let Err(e) = self.switch_to_service_core() {
-                            eprintln!("switch to service core failed: {e:#}");
+                            log::error!("switch to service core failed: {e:#}");
                             let _ = self.rebuild_tray();
                             return;
                         }
                     }
                     if let Some(core) = &self.core_path {
                         if let Err(e) = self.platform.tun.prepare(core) {
-                            eprintln!("prepare TUN capabilities failed: {e:#}");
+                            log::error!("prepare TUN capabilities failed: {e:#}");
                         }
                     }
                     match self.platform.tun.enable(&api) {
-                        Ok(()) => self.tun = self.platform.tun.is_enabled(&api),
-                        Err(e) => eprintln!("enable TUN failed: {e:#}"),
+                        Ok(()) => {
+                            self.tun = self.platform.tun.is_enabled(&api);
+                            log::info!("TUN enabled={}", self.tun);
+                        }
+                        Err(e) => log::error!("enable TUN failed: {e:#}"),
                     }
                 }
                 self.service_ok = self.platform.service.is_available();
@@ -371,8 +389,8 @@ impl App {
                     return;
                 }
                 match self.ensure_service_for_tun() {
-                    Ok(()) => {}
-                    Err(e) => eprintln!("install service failed: {e:#}"),
+                    Ok(()) => log::info!("install service succeeded"),
+                    Err(e) => log::error!("install service failed: {e:#}"),
                 }
                 self.service_ok = self.platform.service.is_available();
                 let _ = self.rebuild_tray();
@@ -397,8 +415,9 @@ impl App {
                     .set_buttons(MessageButtons::OkCancel)
                     .show();
                 if matches!(ok, rfd::MessageDialogResult::Ok) {
-                    if let Err(e) = self.platform.service.uninstall() {
-                        eprintln!("uninstall service failed: {e:#}");
+                    match self.platform.service.uninstall() {
+                        Ok(()) => log::info!("privileged service uninstalled"),
+                        Err(e) => log::error!("uninstall service failed: {e:#}"),
                     }
                 }
                 self.service_ok = self.platform.service.is_available();
@@ -410,14 +429,14 @@ impl App {
                     Ok(map) => {
                         self.delays.insert(group, map);
                     }
-                    Err(e) => eprintln!("speed test failed: {e:#}"),
+                    Err(e) => log::error!("speed test failed: {e:#}"),
                 }
                 let _ = self.rebuild_tray();
             }
             Action::SelectProxy { group, name } => {
                 if let Some(api) = &self.api {
                     if let Err(e) = api.select_proxy(&group, &name) {
-                        eprintln!("select proxy failed: {e:#}");
+                        log::error!("select proxy failed: {e:#}");
                     }
                 }
                 let _ = self.rebuild_tray();
@@ -426,33 +445,36 @@ impl App {
                 let dir = match self.platform.paths.config_dir() {
                     Ok(d) => d,
                     Err(e) => {
-                        eprintln!("{e:#}");
+                        log::error!("{e:#}");
                         return;
                     }
                 };
                 let path = dir.join(&name);
                 if !path.exists() {
-                    eprintln!("profile missing: {name}");
+                    log::error!("profile missing: {name}");
                     return;
                 }
-                if let Err(e) = self.switch_profile(path) {
-                    eprintln!("switch profile failed: {e:#}");
+                match self.switch_profile(path) {
+                    Ok(()) => log::info!("switched profile to {name}"),
+                    Err(e) => log::error!("switch profile failed: {e:#}"),
                 }
                 let _ = self.rebuild_tray();
             }
             Action::ImportProfile => match config::pick_and_import_profile() {
                 Ok(Some(path)) => {
-                    if let Err(e) = self.switch_profile(path) {
-                        eprintln!("import/switch failed: {e:#}");
+                    let name = path.display().to_string();
+                    match self.switch_profile(path) {
+                        Ok(()) => log::info!("imported and switched profile to {name}"),
+                        Err(e) => log::error!("import/switch failed: {e:#}"),
                     }
                     let _ = self.rebuild_tray();
                 }
                 Ok(None) => {}
-                Err(e) => eprintln!("import failed: {e:#}"),
+                Err(e) => log::error!("import failed: {e:#}"),
             },
             Action::OpenConfigFolder => {
                 if let Err(e) = self.platform.paths.open_config_folder() {
-                    eprintln!("open config folder failed: {e:#}");
+                    log::error!("open config folder failed: {e:#}");
                 }
             }
             Action::SetLocale(locale) => {
@@ -485,6 +507,7 @@ impl App {
             return Ok(());
         }
         self.apply_profile(&path)?;
+        log::info!("auto-reloaded active profile {}", path.display());
         Ok(())
     }
 
@@ -527,6 +550,7 @@ impl App {
             return;
         }
         self.quitting = true;
+        log::info!("shutting down");
         self.config_watcher.take();
         let _ = self.platform.system_proxy.disable();
         if let Some(api) = &self.api {
@@ -612,11 +636,11 @@ impl ApplicationHandler<UserEvent> for App {
                     return;
                 }
                 if let Err(e) = self.reload_active_profile() {
-                    eprintln!("auto-reload config failed: {e:#}");
+                    log::error!("auto-reload config failed: {e:#}");
                     return;
                 }
                 if let Err(e) = self.rebuild_tray() {
-                    eprintln!("rebuild tray after auto-reload failed: {e:#}");
+                    log::error!("rebuild tray after auto-reload failed: {e:#}");
                 }
             }
             UserEvent::DownloadProgress(progress) => {
@@ -626,11 +650,13 @@ impl ApplicationHandler<UserEvent> for App {
                 match progress {
                     InstallProgress::Done => {
                         if let Err(e) = self.finish_bootstrap() {
+                            log::error!("bootstrap after download failed: {e:#}");
                             show_error(&format!("{e:#}"));
                             event_loop.exit();
                         }
                     }
                     InstallProgress::Failed(err) => {
+                        log::error!("core download failed: {err}");
                         show_error(&err);
                         event_loop.exit();
                     }
@@ -648,6 +674,7 @@ impl Drop for App {
 }
 
 fn show_error(msg: &str) {
+    log::error!("{msg}");
     let _ = MessageDialog::new()
         .set_level(MessageLevel::Error)
         .set_title(rust_i18n::t!("app.name").to_string())

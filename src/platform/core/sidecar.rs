@@ -57,6 +57,11 @@ impl CoreRunner for SidecarCoreRunner {
             .spawn()
             .with_context(|| format!("spawn {}", core.display()))?;
         *slot().lock().unwrap() = Some(child);
+        log::info!(
+            "sidecar core started: {} (profile={})",
+            core.display(),
+            profile.display()
+        );
         Ok(())
     }
 
@@ -65,11 +70,13 @@ impl CoreRunner for SidecarCoreRunner {
         if let Some(mut child) = guard.take() {
             let _ = child.kill();
             let _ = child.wait();
+            log::info!("sidecar core stopped");
         }
         Ok(())
     }
 
     fn restart(&self, core: &PathBuf, profile: &PathBuf) -> Result<()> {
+        log::info!("restarting sidecar core");
         self.stop()?;
         self.start(core, profile)
     }

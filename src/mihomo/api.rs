@@ -140,6 +140,10 @@ impl ApiClient {
                 }
             }
         }
+        log::warn!(
+            "mihomo API not ready after {attempts} attempts: {:?}",
+            last
+        );
         bail!("mihomo API not ready: {:?}", last)
     }
 

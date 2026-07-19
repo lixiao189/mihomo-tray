@@ -14,6 +14,10 @@ pub fn config_dir() -> Result<PathBuf> {
     Ok(base.join(APP_DIR_NAME))
 }
 
+pub fn logs_dir() -> Result<PathBuf> {
+    Ok(config_dir()?.join("logs"))
+}
+
 pub fn bin_dir() -> Result<PathBuf> {
     Ok(config_dir()?.join("bin"))
 }

@@ -13,8 +13,11 @@ use mihomo_tray_service::{
 };
 
 fn main() {
+    if let Err(e) = mihomo_tray_service::init_logging("mihomo-tray-service-install") {
+        eprintln!("init logging failed: {e:#}");
+    }
     if let Err(e) = run() {
-        eprintln!("mihomo-tray-service-install error: {e:#}");
+        log::error!("mihomo-tray-service-install error: {e:#}");
         std::process::exit(1);
     }
 }
@@ -81,7 +84,7 @@ fn run() -> Result<()> {
         .args(["kickstart", "-k", &format!("system/{SERVICE_LABEL}")])
         .status();
 
-    println!("installed {SERVICE_LABEL}");
+    log::info!("installed {SERVICE_LABEL}");
     Ok(())
 }
 

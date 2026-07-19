@@ -4,6 +4,7 @@ mod app;
 mod config;
 mod download_ui;
 mod i18n;
+mod logging;
 mod mihomo;
 mod paths;
 mod platform;
@@ -18,9 +19,12 @@ use crate::platform::Platform;
 rust_i18n::i18n!("locales", fallback = "en");
 
 fn main() {
+    if let Err(e) = logging::init() {
+        eprintln!("init logging failed: {e:#}");
+    }
     i18n::init();
     if let Err(e) = run() {
-        eprintln!("mihomo-tray error: {e:#}");
+        log::error!("mihomo-tray error: {e:#}");
         std::process::exit(1);
     }
 }

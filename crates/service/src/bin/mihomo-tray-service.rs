@@ -11,14 +11,17 @@ use std::sync::Mutex;
 use anyhow::{Context, Result, bail};
 use mihomo_tray_service::{
     HELPER_DIR, Request, Response, SOCK_DIR, append_core_controller_args, core_ipc_path,
-    ensure_magic, sock_path,
+    ensure_magic, init_logging, sock_path,
 };
 
 static CORE: Mutex<Option<Child>> = Mutex::new(None);
 
 fn main() {
+    if let Err(e) = init_logging("mihomo-tray-service") {
+        eprintln!("init logging failed: {e:#}");
+    }
     if let Err(e) = run() {
-        eprintln!("mihomo-tray-service error: {e:#}");
+        log::error!("mihomo-tray-service error: {e:#}");
         std::process::exit(1);
     }
 }
@@ -32,15 +35,15 @@ fn run() -> Result<()> {
     // Allow the installing user's group to connect (dir is setgid).
     let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o660));
 
-    eprintln!("mihomo-tray-service listening on {}", path.display());
+    log::info!("mihomo-tray-service listening on {}", path.display());
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
                 if let Err(e) = handle_client(stream) {
-                    eprintln!("client error: {e:#}");
+                    log::error!("client error: {e:#}");
                 }
             }
-            Err(e) => eprintln!("accept error: {e}"),
+            Err(e) => log::error!("accept error: {e}"),
         }
     }
     Ok(())
@@ -112,6 +115,7 @@ fn stop_core() -> Result<()> {
     if let Some(mut child) = guard.take() {
         let _ = child.kill();
         let _ = child.wait();
+        log::info!("stopped mihomo core");
     }
     Ok(())
 }
@@ -139,6 +143,7 @@ fn start_core(core: &str, config_dir: &str, profile: &str, safe_paths: &str) -> 
     *CORE.lock().unwrap() = Some(child);
     // Root-created socket: allow the installing user's group (setgid dir) to connect.
     relax_core_socket_perms();
+    log::info!("started mihomo core: {core} (profile={profile})");
     Ok(())
 }
 

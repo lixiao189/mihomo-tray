@@ -134,6 +134,7 @@ fn install_latest_core(
 ) -> Result<()> {
     paths.ensure_dirs()?;
     report(progress, InstallProgress::Resolving);
+    log::info!("resolving latest mihomo release");
 
     let client = reqwest::blocking::Client::builder()
         .user_agent("mihomo-tray")
@@ -164,6 +165,11 @@ fn install_latest_core(
             )
         })?;
 
+    log::info!(
+        "downloading mihomo {} asset {}",
+        release.tag_name,
+        asset.name
+    );
     let mut resp = client
         .get(&asset.browser_download_url)
         .send()
@@ -194,6 +200,7 @@ fn install_latest_core(
     }
 
     report(progress, InstallProgress::Extracting);
+    log::info!("extracting mihomo core ({} bytes)", bytes.len());
 
     let dest = paths.core_binary_path()?;
     if dest.exists() {
@@ -246,6 +253,7 @@ fn install_latest_core(
         let _ = install_wintun(&client, paths);
     }
 
+    log::info!("mihomo core installed at {}", dest.display());
     Ok(())
 }
 
