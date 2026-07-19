@@ -2,11 +2,12 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Instant, SystemTime};
 
 use anyhow::{Context, Result};
 use rfd::{MessageButtons, MessageDialog, MessageLevel};
-use tray_icon::{TrayIcon, TrayIconBuilder, menu::MenuEvent};
+use tray_icon::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent, menu::MenuEvent};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
@@ -17,6 +18,42 @@ use crate::download_ui::ProgressWindow;
 use crate::mihomo::api::ApiClient;
 use crate::platform::{InstallProgress, Platform};
 use crate::tray::{self, Action, MenuIds, TrayState};
+
+/// Main-thread-only pointer to `App` for the tray pre-open refresh hook.
+struct PreMenuAppPtr(*mut App);
+
+// SAFETY: only written/read on the GUI thread; cleared before `App` is dropped.
+unsafe impl Send for PreMenuAppPtr {}
+unsafe impl Sync for PreMenuAppPtr {}
+
+/// `tray-icon` invokes the click handler synchronously *before* showing the menu
+/// (macOS/Windows). We rebuild there so checkmarks match live `GET /proxies`.
+fn pre_menu_app() -> &'static Mutex<Option<PreMenuAppPtr>> {
+    static SLOT: OnceLock<Mutex<Option<PreMenuAppPtr>>> = OnceLock::new();
+    SLOT.get_or_init(|| Mutex::new(None))
+}
+
+fn register_pre_menu_app(app: &mut App) {
+    *pre_menu_app().lock().unwrap() = Some(PreMenuAppPtr(std::ptr::from_mut(app)));
+}
+
+fn clear_pre_menu_app() {
+    *pre_menu_app().lock().unwrap() = None;
+}
+
+fn refresh_tray_before_menu_open() {
+    let ptr = pre_menu_app().lock().unwrap().as_ref().map(|p| p.0);
+    let Some(ptr) = ptr else {
+        return;
+    };
+    // SAFETY: pointer is set while `App` is owned by the event loop and cleared on Drop.
+    // Called only on the GUI thread from the tray click handler before the menu pops up.
+    unsafe {
+        if let Some(app) = ptr.as_mut() {
+            app.on_tray_menu_about_to_open();
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum UserEvent {
@@ -237,6 +274,17 @@ impl App {
             load_icon(self.platform.appearance.as_ref()),
         ) {
             self.platform.appearance.apply_tray_icon(tray, icon);
+        }
+    }
+
+    /// Sync live proxy selection (and related flags) before the tray menu is shown.
+    fn on_tray_menu_about_to_open(&mut self) {
+        if !self.ready || self.quitting || self.api.is_none() {
+            return;
+        }
+        self.refresh_runtime_flags();
+        if let Err(e) = self.rebuild_tray() {
+            log::error!("rebuild tray before menu open failed: {e:#}");
         }
     }
 
@@ -562,12 +610,14 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: winit::event::StartCause) {
+        register_pre_menu_app(self);
         if matches!(cause, winit::event::StartCause::Init) {
             self.start_bootstrap(event_loop);
         }
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        register_pre_menu_app(self);
         let Some(interval) = self.platform.appearance.theme_poll_interval() else {
             return;
         };
@@ -609,6 +659,7 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
+        register_pre_menu_app(self);
         match event {
             UserEvent::Menu(ev) => {
                 let action = self.menu_ids.resolve(&ev.id).cloned();
@@ -655,6 +706,7 @@ impl ApplicationHandler<UserEvent> for App {
 
 impl Drop for App {
     fn drop(&mut self) {
+        clear_pre_menu_app();
         self.shutdown();
     }
 }
@@ -700,7 +752,18 @@ pub fn install_event_handlers(proxy: EventLoopProxy<UserEvent>) {
         let _ = p1.send_event(UserEvent::Menu(event));
     }));
     let p2 = proxy;
-    tray_icon::TrayIconEvent::set_event_handler(Some(move |_event| {
+    TrayIconEvent::set_event_handler(Some(move |event| {
+        // Runs before the platform pops up the menu — refresh from live API first.
+        if matches!(
+            event,
+            TrayIconEvent::Click {
+                button: MouseButton::Left | MouseButton::Right,
+                button_state: MouseButtonState::Down,
+                ..
+            }
+        ) {
+            refresh_tray_before_menu_open();
+        }
         let _ = p2.send_event(UserEvent::Tray);
     }));
 }
