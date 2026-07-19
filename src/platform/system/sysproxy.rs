@@ -1,20 +1,27 @@
 use anyhow::{Context, Result};
 use sysproxy::Sysproxy;
 
+use super::bypass::BypassPolicy;
 use crate::platform::traits::SystemProxy;
 
-const BYPASS: &str = "localhost,127.0.0.1,*.local,10.*,172.16.*,172.17.*,172.18.*,172.19.*,172.20.*,172.21.*,172.22.*,172.23.*,172.24.*,172.25.*,172.26.*,172.27.*,172.28.*,172.29.*,172.30.*,172.31.*,192.168.*,<local>";
+pub struct SysproxyBackend<B> {
+    bypass: B,
+}
 
-pub struct SysproxyBackend;
+impl<B: BypassPolicy> SysproxyBackend<B> {
+    pub fn new(bypass: B) -> Self {
+        Self { bypass }
+    }
+}
 
-impl SystemProxy for SysproxyBackend {
+impl<B: BypassPolicy> SystemProxy for SysproxyBackend<B> {
     fn enable(&self, http_port: u16, _socks_port: u16) -> Result<()> {
         // sysproxy uses a single port field; prefer mixed/http port for HTTP(S).
         let proxy = Sysproxy {
             enable: true,
             host: "127.0.0.1".to_string(),
             port: http_port,
-            bypass: BYPASS.to_string(),
+            bypass: self.bypass.when_enabled().to_string(),
         };
         proxy.set_system_proxy().context("set system proxy")
     }
@@ -24,7 +31,7 @@ impl SystemProxy for SysproxyBackend {
             enable: false,
             host: "127.0.0.1".to_string(),
             port: 0,
-            bypass: BYPASS.to_string(),
+            bypass: self.bypass.when_disabled().to_string(),
         };
         proxy.set_system_proxy().context("disable system proxy")
     }

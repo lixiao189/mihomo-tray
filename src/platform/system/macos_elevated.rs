@@ -1,10 +1,19 @@
 use anyhow::{Context, Result, bail};
 
+use super::bypass::BypassPolicy;
 use crate::platform::traits::SystemProxy;
 
-pub struct MacosElevatedBackend;
+pub struct MacosElevatedBackend<B> {
+    bypass: B,
+}
 
-impl SystemProxy for MacosElevatedBackend {
+impl<B: BypassPolicy> MacosElevatedBackend<B> {
+    pub fn new(bypass: B) -> Self {
+        Self { bypass }
+    }
+}
+
+impl<B: BypassPolicy> SystemProxy for MacosElevatedBackend<B> {
     fn enable(&self, http_port: u16, socks_port: u16) -> Result<()> {
         let services = network_services()?;
         let mut cmds = Vec::new();
@@ -32,6 +41,7 @@ impl SystemProxy for MacosElevatedBackend {
 
     fn disable(&self) -> Result<()> {
         let services = network_services()?;
+        let clear = self.bypass.when_disabled();
         let mut cmds = Vec::new();
         for svc in services {
             let escaped = svc.replace('"', "\\\"");
@@ -41,6 +51,9 @@ impl SystemProxy for MacosElevatedBackend {
             ));
             cmds.push(format!(
                 "networksetup -setsocksfirewallproxystate \"{escaped}\" off"
+            ));
+            cmds.push(format!(
+                "networksetup -setproxybypassdomains \"{escaped}\" {clear}"
             ));
         }
         run_osascript_admin(&cmds.join(" && "))
