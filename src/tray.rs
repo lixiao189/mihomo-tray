@@ -115,11 +115,10 @@ pub fn build_menu(state: &TrayState) -> (Menu, MenuIds) {
 
     let _ = menu.append(&PredefinedMenuItem::separator());
 
-    // Groups
-    let groups_menu = Submenu::new(t!("menu.groups").to_string(), true);
+    // Proxy groups — each group as a top-level submenu
     if state.groups.is_empty() {
         let empty = MenuItem::new(t!("menu.no_groups").to_string(), false, None);
-        let _ = groups_menu.append(&empty);
+        let _ = menu.append(&empty);
     } else {
         for group in &state.groups {
             let sub = Submenu::new(&group.name, true);
@@ -158,12 +157,13 @@ pub fn build_menu(state: &TrayState) -> (Menu, MenuIds) {
                 );
                 let _ = sub.append(&item);
             }
-            let _ = groups_menu.append(&sub);
+            let _ = menu.append(&sub);
         }
     }
-    let _ = menu.append(&groups_menu);
 
-    // Config
+    let _ = menu.append(&PredefinedMenuItem::separator());
+
+    // Config + Language together
     let config_menu = Submenu::new(t!("menu.config").to_string(), true);
     for profile in &state.profiles {
         let name = paths::profile_display_name(profile);
@@ -199,9 +199,6 @@ pub fn build_menu(state: &TrayState) -> (Menu, MenuIds) {
     let _ = config_menu.append(&open);
     let _ = menu.append(&config_menu);
 
-    let _ = menu.append(&PredefinedMenuItem::separator());
-
-    // Language
     let lang_menu = Submenu::new(t!("menu.language").to_string(), true);
     let zh = i18n::is_zh();
     let zh_id = next_id("lang");
