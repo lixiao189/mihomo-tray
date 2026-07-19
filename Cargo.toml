@@ -1,6 +1,53 @@
+[workspace]
+members = [".", "crates/service"]
+resolver = "2"
+
 [package]
 name = "mihomo-tray"
 version = "0.1.0"
 edition = "2024"
+description = "Cross-platform tray app to manage MetaCubeX mihomo"
+license = "MIT"
+authors = ["mihomo-tray"]
+
+[package.metadata.bundle]
+name = "Mihomo Tray"
+identifier = "com.mihomotray.app"
+icon = ["assets/icon.png"]
+category = "Utility"
+short_description = "Mihomo tray manager"
+long_description = "Cross-platform tray app to manage MetaCubeX mihomo."
+
+[package.metadata.i18n]
+available-locales = ["en", "zh-CN"]
+default-locale = "en"
+load-path = "locales"
 
 [dependencies]
+anyhow = "1"
+dirs = "6"
+flate2 = "1"
+image = { version = "0.25", default-features = false, features = ["png"] }
+mihomo-tray-service = { path = "crates/service" }
+notify-debouncer-mini = "0.6"
+open = "5"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+rfd = "0.15"
+rust-i18n = "4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+softbuffer = "0.4"
+sys-locale = "0.3"
+sysproxy = "0.3"
+thiserror = "2"
+tray-icon = "0.21"
+winit = "0.30"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Threading"] }
+winreg = "0.55"
+
+[target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "dragonfly", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
+dark-light = "2"

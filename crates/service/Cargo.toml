@@ -1,0 +1,24 @@
+[package]
+name = "mihomo-tray-service"
+version = "0.1.0"
+edition = "2024"
+description = "Privileged helper service for mihomo-tray"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "mihomo-tray-service"
+path = "src/bin/mihomo-tray-service.rs"
+
+[[bin]]
+name = "mihomo-tray-service-install"
+path = "src/bin/mihomo-tray-service-install.rs"
+
+[[bin]]
+name = "mihomo-tray-service-uninstall"
+path = "src/bin/mihomo-tray-service-uninstall.rs"
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
