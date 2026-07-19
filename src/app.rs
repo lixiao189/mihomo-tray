@@ -17,6 +17,7 @@ use crate::config::{self, ActiveConfigWatcher, ProfileMeta};
 use crate::download_ui::ProgressWindow;
 use crate::mihomo::api::ApiClient;
 use crate::platform::{InstallProgress, Platform};
+use crate::settings::Settings;
 use crate::tray::{self, Action, MenuIds, TrayState};
 
 /// Main-thread-only pointer to `App` for the tray pre-open refresh hook.
@@ -72,12 +73,14 @@ enum CoreMode {
 pub struct App {
     platform: Platform,
     proxy: EventLoopProxy<UserEvent>,
+    settings: Settings,
     tray: Option<TrayIcon>,
     menu_ids: MenuIds,
     api: Option<ApiClient>,
     core_path: Option<PathBuf>,
     active_profile: Option<PathBuf>,
     profile_meta: Option<ProfileMeta>,
+    /// Live runtime flags (may differ from persisted prefs until restored / saved).
     system_proxy: bool,
     tun: bool,
     service_ok: bool,
@@ -93,7 +96,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(proxy: EventLoopProxy<UserEvent>, platform: Platform) -> Self {
+    pub fn new(proxy: EventLoopProxy<UserEvent>, platform: Platform, settings: Settings) -> Self {
         let tray_bg_dark = platform.appearance.tray_background_is_dark();
         let next_theme_poll = platform
             .appearance
@@ -103,6 +106,7 @@ impl App {
         Self {
             platform,
             proxy,
+            settings,
             tray: None,
             menu_ids: MenuIds {
                 map: HashMap::new(),
@@ -203,6 +207,7 @@ impl App {
             log::warn!("config watcher failed: {e:#}");
         }
         self.refresh_runtime_flags();
+        self.restore_switch_state();
         self.rebuild_tray()?;
         self.progress = None;
         log::info!(
@@ -283,6 +288,7 @@ impl App {
             return;
         }
         self.refresh_runtime_flags();
+        self.persist_switch_state();
         if let Err(e) = self.rebuild_tray() {
             log::error!("rebuild tray before menu open failed: {e:#}");
         }
@@ -294,6 +300,107 @@ impl App {
         }
         self.system_proxy = self.platform.system_proxy.is_enabled();
         self.service_ok = self.platform.service.is_available();
+    }
+
+    /// Mirror live switch flags into `settings.json` (memory + disk).
+    fn persist_switch_state(&mut self) {
+        if self.settings.system_proxy() == self.system_proxy && self.settings.tun() == self.tun {
+            return;
+        }
+        if let Err(e) = self
+            .settings
+            .set_switches(self.system_proxy, self.tun)
+        {
+            log::warn!("save switch state failed: {e:#}");
+        }
+    }
+
+    /// Re-enable TUN / system proxy from the last session after the core is ready.
+    fn restore_switch_state(&mut self) {
+        let want_tun = self.settings.tun();
+        let want_proxy = self.settings.system_proxy();
+        if !want_tun && !want_proxy {
+            return;
+        }
+        // Mutual exclusion: prefer TUN when both flags are set.
+        if want_tun {
+            log::info!("restoring TUN from previous session");
+            match self.set_tun_enabled(true) {
+                Ok(()) => self.persist_switch_state(),
+                Err(e) => log::error!("restore TUN failed: {e:#}"),
+            }
+        } else if want_proxy {
+            log::info!("restoring system proxy from previous session");
+            match self.set_system_proxy_enabled(true) {
+                Ok(()) => self.persist_switch_state(),
+                Err(e) => log::error!("restore system proxy failed: {e:#}"),
+            }
+        }
+    }
+
+    fn set_system_proxy_enabled(&mut self, enable: bool) -> Result<()> {
+        let api = self.api.clone().context("api not ready")?;
+        let meta = self.profile_meta.clone();
+        if !enable {
+            let _ = self.platform.system_proxy.disable();
+            self.system_proxy = false;
+            log::info!("system proxy disabled");
+            return Ok(());
+        }
+        if self.tun {
+            let _ = self.platform.tun.disable(&api);
+            self.tun = false;
+            if self.core_mode == CoreMode::Service {
+                let _ = self.switch_to_sidecar_core();
+            }
+        }
+        // Prefer profile YAML ports; fall back to live /configs (0 = unset).
+        let http = meta
+            .as_ref()
+            .map(|m| m.http_port())
+            .unwrap_or_else(|| api.http_port().unwrap_or(7890));
+        let socks = meta
+            .as_ref()
+            .map(|m| m.socks_port())
+            .unwrap_or_else(|| api.socks_port().unwrap_or(7890));
+        self.platform.system_proxy.enable(http, socks)?;
+        self.system_proxy = true;
+        log::info!("system proxy enabled (http={http}, socks={socks})");
+        Ok(())
+    }
+
+    fn set_tun_enabled(&mut self, enable: bool) -> Result<()> {
+        let api = self.api.clone().context("api not ready")?;
+        if !enable {
+            let _ = self.platform.tun.disable(&api);
+            self.tun = false;
+            log::info!("TUN disabled");
+            if self.core_mode == CoreMode::Service {
+                if let Err(e) = self.switch_to_sidecar_core() {
+                    log::error!("switch to sidecar failed: {e:#}");
+                }
+            }
+            self.service_ok = self.platform.service.is_available();
+            return Ok(());
+        }
+        if self.system_proxy {
+            let _ = self.platform.system_proxy.disable();
+            self.system_proxy = false;
+        }
+        if self.platform.tun.requires_privileged_core() {
+            self.ensure_service_for_tun()?;
+            self.switch_to_service_core()?;
+        }
+        if let Some(core) = &self.core_path {
+            if let Err(e) = self.platform.tun.prepare(core) {
+                log::error!("prepare TUN capabilities failed: {e:#}");
+            }
+        }
+        self.platform.tun.enable(&api)?;
+        self.tun = self.platform.tun.is_enabled(&api);
+        self.service_ok = self.platform.service.is_available();
+        log::info!("TUN enabled={}", self.tun);
+        Ok(())
     }
 
     fn ensure_service_for_tun(&mut self) -> Result<()> {
@@ -352,81 +459,25 @@ impl App {
         }
         match action {
             Action::ToggleSystemProxy => {
-                let Some(api) = self.api.clone() else { return };
-                let meta = self.profile_meta.clone();
-                if self.system_proxy {
-                    let _ = self.platform.system_proxy.disable();
-                    self.system_proxy = false;
-                    log::info!("system proxy disabled");
-                } else {
-                    if self.tun {
-                        let _ = self.platform.tun.disable(&api);
-                        self.tun = false;
-                        if self.core_mode == CoreMode::Service {
-                            let _ = self.switch_to_sidecar_core();
-                        }
-                    }
-                    // Prefer profile YAML ports; fall back to live /configs (0 = unset).
-                    let http = meta
-                        .as_ref()
-                        .map(|m| m.http_port())
-                        .unwrap_or_else(|| api.http_port().unwrap_or(7890));
-                    let socks = meta
-                        .as_ref()
-                        .map(|m| m.socks_port())
-                        .unwrap_or_else(|| api.socks_port().unwrap_or(7890));
-                    match self.platform.system_proxy.enable(http, socks) {
-                        Ok(()) => {
-                            self.system_proxy = true;
-                            log::info!("system proxy enabled (http={http}, socks={socks})");
-                        }
-                        Err(e) => log::error!("enable system proxy failed: {e:#}"),
-                    }
+                let enable = !self.system_proxy;
+                match self.set_system_proxy_enabled(enable) {
+                    Ok(()) => self.persist_switch_state(),
+                    Err(e) => log::error!(
+                        "{} system proxy failed: {e:#}",
+                        if enable { "enable" } else { "disable" }
+                    ),
                 }
                 let _ = self.rebuild_tray();
             }
             Action::ToggleTun => {
-                let Some(api) = self.api.clone() else { return };
-                if self.tun {
-                    let _ = self.platform.tun.disable(&api);
-                    self.tun = false;
-                    log::info!("TUN disabled");
-                    if self.core_mode == CoreMode::Service {
-                        if let Err(e) = self.switch_to_sidecar_core() {
-                            log::error!("switch to sidecar failed: {e:#}");
-                        }
-                    }
-                } else {
-                    if self.system_proxy {
-                        let _ = self.platform.system_proxy.disable();
-                        self.system_proxy = false;
-                    }
-                    if self.platform.tun.requires_privileged_core() {
-                        if let Err(e) = self.ensure_service_for_tun() {
-                            log::error!("service required for TUN: {e:#}");
-                            let _ = self.rebuild_tray();
-                            return;
-                        }
-                        if let Err(e) = self.switch_to_service_core() {
-                            log::error!("switch to service core failed: {e:#}");
-                            let _ = self.rebuild_tray();
-                            return;
-                        }
-                    }
-                    if let Some(core) = &self.core_path {
-                        if let Err(e) = self.platform.tun.prepare(core) {
-                            log::error!("prepare TUN capabilities failed: {e:#}");
-                        }
-                    }
-                    match self.platform.tun.enable(&api) {
-                        Ok(()) => {
-                            self.tun = self.platform.tun.is_enabled(&api);
-                            log::info!("TUN enabled={}", self.tun);
-                        }
-                        Err(e) => log::error!("enable TUN failed: {e:#}"),
-                    }
+                let enable = !self.tun;
+                match self.set_tun_enabled(enable) {
+                    Ok(()) => self.persist_switch_state(),
+                    Err(e) => log::error!(
+                        "{} TUN failed: {e:#}",
+                        if enable { "enable" } else { "disable" }
+                    ),
                 }
-                self.service_ok = self.platform.service.is_available();
                 let _ = self.rebuild_tray();
             }
             Action::InstallService => {
@@ -445,10 +496,11 @@ impl App {
                     return;
                 }
                 if self.tun {
-                    if let Some(api) = &self.api {
-                        let _ = self.platform.tun.disable(api);
+                    if let Err(e) = self.set_tun_enabled(false) {
+                        log::error!("disable TUN before uninstall failed: {e:#}");
+                    } else {
+                        self.persist_switch_state();
                     }
-                    self.tun = false;
                 }
                 if self.core_mode == CoreMode::Service {
                     let _ = self.switch_to_sidecar_core();
@@ -514,6 +566,9 @@ impl App {
             }
             Action::SetLocale(locale) => {
                 crate::i18n::set_locale(locale);
+                if let Err(e) = self.settings.set_locale(locale) {
+                    log::warn!("save locale failed: {e:#}");
+                }
                 let _ = self.rebuild_tray();
             }
             Action::Quit => {

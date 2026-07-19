@@ -1,9 +1,9 @@
-/// Detect OS language and map to a rust-i18n locale (`zh-CN` or `en`).
-pub fn init() {
-    let locale = detect_locale();
-    rust_i18n::set_locale(&locale);
+/// Apply a locale string (`zh-CN` / `en`) to rust-i18n.
+pub fn init(locale: &str) {
+    set_locale(locale);
 }
 
+/// Detect OS language and map to a rust-i18n locale (`zh-CN` or `en`).
 pub fn detect_locale() -> String {
     let raw = std::env::var("MIHOMO_TRAY_LANG")
         .or_else(|_| std::env::var("LANG"))

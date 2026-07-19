@@ -8,6 +8,7 @@ mod logging;
 mod mihomo;
 mod paths;
 mod platform;
+mod settings;
 mod tray;
 
 use anyhow::Context;
@@ -22,14 +23,16 @@ fn main() {
     if let Err(e) = logging::init() {
         eprintln!("init logging failed: {e:#}");
     }
-    i18n::init();
-    if let Err(e) = run() {
+    // Detect / load prefs first, then apply locale from the resolved settings.
+    let settings = settings::Settings::load_or_init();
+    i18n::init(settings.locale());
+    if let Err(e) = run(settings) {
         log::error!("mihomo-tray error: {e:#}");
         std::process::exit(1);
     }
 }
 
-fn run() -> anyhow::Result<()> {
+fn run(settings: settings::Settings) -> anyhow::Result<()> {
     let platform = Platform::default_for_host();
 
     let mut builder = EventLoop::<UserEvent>::with_user_event();
@@ -38,7 +41,7 @@ fn run() -> anyhow::Result<()> {
 
     let proxy = event_loop.create_proxy();
     app::install_event_handlers(proxy.clone());
-    let mut application = App::new(proxy, platform);
+    let mut application = App::new(proxy, platform, settings);
 
     event_loop.run_app(&mut application).context("run app")?;
     Ok(())
