@@ -1,10 +1,14 @@
 mod bypass;
 mod fallback;
 #[cfg(target_os = "macos")]
+mod macos_dns;
+#[cfg(target_os = "macos")]
 mod macos_elevated;
 mod sysproxy;
 
 pub use fallback::FallbackProxy;
+#[cfg(target_os = "macos")]
+pub use macos_dns::{restore_public_dns, set_public_dns};
 #[cfg(target_os = "macos")]
 pub use macos_elevated::MacosElevatedBackend;
 pub use sysproxy::SysproxyBackend;
