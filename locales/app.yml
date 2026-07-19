@@ -73,8 +73,8 @@ dialog.service_install_title:
   zh-CN: 安装特权服务
 
 dialog.service_install_body:
-  en: TUN mode needs a one-time privileged helper (like Clash Verge). After installation, enabling TUN and quitting will not ask for your password again.
-  zh-CN: TUN 模式需要一次性安装特权服务（与 Clash Verge 相同）。安装后，开关 TUN 与退出应用都不再需要输入密码。
+  en: TUN mode needs a one-time privileged helper. After installation, enabling TUN and quitting will not ask for your password again.
+  zh-CN: TUN 模式需要一次性安装特权服务。安装后，开关 TUN 与退出应用都不再需要输入密码。
 
 dialog.service_install_prompt:
   en: mihomo-tray needs administrator privileges to install its helper service.

@@ -141,19 +141,41 @@ fn start_core(core: &str, config_dir: &str, profile: &str, safe_paths: &str) -> 
         .spawn()
         .with_context(|| format!("spawn {}", core_path.display()))?;
     *CORE.lock().unwrap() = Some(child);
-    // Root-created socket: allow the installing user's group (setgid dir) to connect.
-    relax_core_socket_perms();
+    // Wait for the local API socket; root-created socket needs group-readable perms.
+    wait_core_socket().with_context(|| {
+        format!("mihomo started but API socket not ready ({core}, profile={profile})")
+    })?;
     log::info!("started mihomo core: {core} (profile={profile})");
     Ok(())
 }
 
-fn relax_core_socket_perms() {
+fn wait_core_socket() -> Result<()> {
     let path = core_ipc_path();
     for _ in 0..50 {
+        {
+            let mut guard = CORE.lock().unwrap();
+            if let Some(child) = guard.as_mut() {
+                match child.try_wait() {
+                    Ok(Some(status)) => {
+                        *guard = None;
+                        bail!("mihomo exited immediately with {status}");
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        *guard = None;
+                        bail!("failed to poll mihomo process: {e}");
+                    }
+                }
+            } else {
+                bail!("mihomo process handle missing");
+            }
+        }
         if path.exists() {
             let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o660));
-            return;
+            return Ok(());
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
+    let _ = stop_core();
+    bail!("timed out waiting for {}", path.display())
 }

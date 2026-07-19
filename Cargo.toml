@@ -9,6 +9,18 @@ edition = "2024"
 description = "Cross-platform tray app to manage MetaCubeX mihomo"
 license = "MIT"
 authors = ["mihomo-tray"]
+default-run = "mihomo-tray"
+
+# Built next to `mihomo-tray` so `cargo run` / install can find helpers.
+[[bin]]
+name = "mihomo-tray-service"
+path = "crates/service/src/bin/mihomo-tray-service.rs"
+[[bin]]
+name = "mihomo-tray-service-install"
+path = "crates/service/src/bin/mihomo-tray-service-install.rs"
+[[bin]]
+name = "mihomo-tray-service-uninstall"
+path = "crates/service/src/bin/mihomo-tray-service-uninstall.rs"
 
 [package.metadata.bundle]
 name = "Mihomo Tray"

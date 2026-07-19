@@ -128,24 +128,8 @@ fn prepare_sock_dir(gid: u32) -> Result<()> {
 }
 
 fn render_plist(bin: &Path) -> String {
-    format!(
-        r#"<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key><string>{label}</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>{bin}</string>
-  </array>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>/var/log/mihomo-tray-service.out.log</string>
-  <key>StandardErrorPath</key><string>/var/log/mihomo-tray-service.err.log</string>
-</dict>
-</plist>
-"#,
-        label = SERVICE_LABEL,
-        bin = bin.display(),
-    )
+    const TEMPLATE: &str = include_str!("../../../../assets/service.launchd.plist");
+    TEMPLATE
+        .replace("{{label}}", SERVICE_LABEL)
+        .replace("{{bin}}", &bin.display().to_string())
 }
